@@ -24,9 +24,9 @@ const stream = (server) => {
      */
     setInterval(() => {
         const frame = videoCap.read();
-        const frameWithFaces = faceDetector(frame);
-        const imageWithFaces = cv.imencode('.jpg', frameWithFaces).toString('base64');
-        io.emit('new-frame', { transformed: imageWithFaces });
+        const faces = detectFaces(frame);
+        const imageWithFaces = cv.imencode('.jpg', frame).toString('base64');
+        io.emit('new-frame', { transformed: imageWithFaces, transformationData: calculatePeoplePosition(frame, faces) });
     }, 10000 / fps);
 };
 
@@ -34,25 +34,56 @@ const stream = (server) => {
  * 
  * Face detection transformation on the stream
  */
-const faceDetector = (frame) => {
+const detectFaces = (frame) => {
+    let faces = [];
+    const image = frame.bgrToGray();
     const classifier = new cv.CascadeClassifier(cv.HAAR_FRONTALFACE_ALT2);
-
-    const detection = classifier.detectMultiScale(frame.bgrToGray());
-
-    if (!detection.objects.length) {
-        // no faces detectd
-        return frame;
+    const results = classifier.detectMultiScale(image);
+    if (results.objects.length) {
+        results.objects.forEach((faceRect, i) => {
+            if (results.numDetections[i] < 1) {
+                return;
+            }
+            drawFaces(frame, faceRect);
+            faces.push(faceRect);
+        });
     }
-
-    // draw faces
-    const frameWithFaces = frame.copy();
-    detection.objects.forEach((rect, i) => {
-        const blue = new cv.Vec(255, 0, 0);
-        frameWithFaces.drawRectangle(
-            new cv.Point(rect.x, rect.y),
-            new cv.Point(rect.x + rect.width, rect.y + rect.height), { color: blue, thickness: 2 }
-        );
-    });
-    return frameWithFaces;
+    return faces;
 };
+/**
+ * Drawing rects around faces on frame
+ */
+const drawFaces = (frame, faceRect) => {
+    const rect = cv.drawDetection(frame, faceRect, {
+        color: new cv.Vec(255, 0, 0),
+        segmentFraction: 4
+    });
+};
+
+function calculatePeoplePosition(frame, faces) {
+    let display = [0, 0, 0, 0];
+    const image = frame.bgrToGray();
+    const height = image.sizes[0];
+    const width = image.sizes[1];
+    faces.forEach((rectSize) => {
+        const x = rectSize.x;
+        const y = rectSize.y;
+        if (x <= width / 2) {
+            if (y <= height / 2) {
+                display[0]++;
+            } else {
+                display[3]++;
+            }
+        } else {
+            if (y <= height / 2) {
+                display[1]++;
+            } else {
+                display[2]++;
+            }
+        }
+    })
+    return display;
+}
+
+
 module.exports = stream;
